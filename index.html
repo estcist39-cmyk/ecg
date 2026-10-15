@@ -237,10 +237,13 @@
                     </div>
 
                     <div class="space-y-2">
-                        <label class="block text-xs font-bold text-slate-700">4択選択肢 & 正解指定 <span class="text-red-500">*</span></label>
+                        <label class="block text-xs font-bold text-slate-700">
+                            4択選択肢 & 正解指定 (複数指定可能) <span class="text-red-500">*</span>
+                        </label>
                         <div id="options-inputs-container" class="space-y-2"></div>
                     </div>
 
+                    <!-- 解説情報エリア (複数画像対応) -->
                     <div class="p-3 sm:p-4 bg-emerald-50/50 rounded-xl border border-emerald-200/80 space-y-3">
                         <h3 class="text-xs sm:text-sm font-bold text-emerald-800 flex items-center gap-1.5">
                             <i class="fa-solid fa-lightbulb text-emerald-600"></i> 解答後の解説情報
@@ -250,25 +253,17 @@
                             <textarea id="input-explanation" required rows="3" placeholder="解説文を入力" 
                                 class="w-full bg-white border border-slate-300 rounded-lg p-2.5 sm:p-3 text-xs sm:text-sm focus:ring-2 focus:ring-emerald-500"></textarea>
                         </div>
+
                         <div>
-                            <label class="block text-xs font-bold text-slate-700 mb-1">解説用画像 (任意)</label>
-                            <div class="flex flex-col sm:flex-row gap-2">
-                                <label class="flex-1 cursor-pointer">
-                                    <div class="flex items-center justify-center gap-1.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-semibold px-3 py-2 rounded-lg text-center">
-                                        <i class="fa-solid fa-upload text-emerald-600"></i> ファイルから選択
-                                    </div>
-                                    <input type="file" id="input-exp-image-file" accept="image/*" onchange="handleImageFileSelect(event, 'exp-preview', 'input-exp-image-url')" class="hidden">
-                                </label>
-                                <span class="text-xs text-slate-400 text-center sm:self-center">または</span>
-                                <input type="url" id="input-exp-image-url" placeholder="解説画像URL (https://...)" 
-                                    oninput="handleImageUrlInput(this.value, 'exp-preview')"
-                                    class="flex-[2] bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs sm:text-sm focus:ring-2 focus:ring-emerald-500">
+                            <div class="flex items-center justify-between mb-1.5">
+                                <label class="block text-xs font-bold text-slate-700">解説用画像 (複数登録可能 / 最大4枚)</label>
+                                <button type="button" onclick="addExpImageSlot()" class="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2.5 py-1 rounded-lg transition-all flex items-center gap-1">
+                                    <i class="fa-solid fa-plus"></i> 画像を追加
+                                </button>
                             </div>
-                            <div id="exp-preview-wrapper" class="relative mt-2 rounded-lg border border-slate-200 bg-white overflow-hidden min-h-[90px] flex items-center justify-center">
-                                <img id="exp-preview" src="" class="hidden max-h-40 w-full object-contain p-2 cursor-zoom-in" onclick="openZoomModal(this.src)">
-                                <div id="exp-preview-placeholder" class="text-center text-slate-400 p-2">
-                                    <p class="text-xs">解説用画像がプレビュー表示されます</p>
-                                </div>
+                            
+                            <div id="exp-images-container" class="space-y-3">
+                                <!-- JSで動的に追加されます -->
                             </div>
                         </div>
                     </div>
@@ -375,9 +370,10 @@
         let currentQuizMode = 'unanswered';
         let currentFilteredQuestions = [];
         let currentQuestionIndex = 0;
-        let selectedOptionIndex = null;
+        let selectedOptionIndices = [];
         let isAnswered = false;
         let isFirstLoad = true;
+        let expImageSlotCount = 0;
 
         const DEFAULT_PASS = "0924";
         let isUnlocked = false;
@@ -393,6 +389,7 @@
             if (staffInput) staffInput.value = savedStaffId;
 
             setupOptionInputs();
+            addExpImageSlot(); // 初期画像スロット1つ設置
             fetchQuestionsFromSheet();
             setInterval(fetchQuestionsFromSheet, 5000);
         });
@@ -400,6 +397,19 @@
         function saveStaffId(val) {
             localStorage.setItem('ecg_staff_id', val.trim());
             renderQuiz();
+        }
+
+        function getCorrectIndices(q) {
+            if (Array.isArray(q.correctIndices)) return q.correctIndices.map(Number);
+            if (q.correctIndex !== undefined && q.correctIndex !== null) return [Number(q.correctIndex)];
+            return [];
+        }
+
+        // 後方互換性関数：単一/複数解説画像データの自動配列変換
+        function getExpImageUrls(q) {
+            if (Array.isArray(q.explanationImageUrls)) return q.explanationImageUrls.filter(url => url && url.trim() !== '');
+            if (q.explanationImageUrl && q.explanationImageUrl.trim() !== '') return [q.explanationImageUrl];
+            return [];
         }
 
         async function fetchQuestionsFromSheet() {
@@ -460,7 +470,7 @@
         function setQuizMode(mode) {
             currentQuizMode = mode;
             currentQuestionIndex = 0;
-            selectedOptionIndex = null;
+            selectedOptionIndices = [];
             isAnswered = false;
 
             const uBtn = document.getElementById('mode-unanswered-btn');
@@ -478,7 +488,7 @@
         }
 
         // ========================================================
-        // 2. 画像拡大モーダル（ライトボックス）処理
+        // 画像拡大モーダル（ライトボックス）処理
         // ========================================================
         function openZoomModal(src) {
             if (!src || src === window.location.href) return;
@@ -487,7 +497,7 @@
             if (modal && modalImg) {
                 modalImg.src = src;
                 modal.classList.remove('hidden');
-                document.body.style.overflow = 'hidden'; // 背景スクロール防止
+                document.body.style.overflow = 'hidden';
             }
         }
 
@@ -589,7 +599,7 @@
         function setCategoryFilter(group) {
             currentFilterGroup = group;
             currentQuestionIndex = 0;
-            selectedOptionIndex = null;
+            selectedOptionIndices = [];
             isAnswered = false;
             renderCategoryTabs();
             renderQuiz();
@@ -654,6 +664,7 @@
 
             if (currentQuestionIndex >= currentFilteredQuestions.length) currentQuestionIndex = 0;
             const q = currentFilteredQuestions[currentQuestionIndex];
+            const correctIndices = getCorrectIndices(q);
 
             const currentStaffId = localStorage.getItem('ecg_staff_id') || '';
             const isAnsweredByStaff = currentStaffId && histories.some(h => String(h.staffId) === String(currentStaffId) && Number(h.questionId) === Number(q.id));
@@ -687,8 +698,20 @@
                     </div>
 
                     <div class="space-y-2">
-                        <p class="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">回答を選択してください</p>
-                        ${q.options.map((opt, idx) => renderOptionButton(opt, idx, q.correctIndex)).join('')}
+                        <div class="flex justify-between items-center mb-1">
+                            <p class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">回答を選択してください (複数選択可)</p>
+                            ${correctIndices.length > 1 ? `<span class="text-[10px] bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-full">正解：${correctIndices.length}つ</span>` : ''}
+                        </div>
+                        
+                        ${q.options.map((opt, idx) => renderOptionButton(opt, idx, correctIndices)).join('')}
+
+                        ${!isAnswered ? `
+                            <div class="pt-3 flex justify-end">
+                                <button onclick="submitUserAnswer()" class="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-medical-600 hover:bg-medical-700 text-white font-bold text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2">
+                                    <i class="fa-solid fa-paper-plane"></i> この内容で回答する
+                                </button>
+                            </div>
+                        ` : ''}
                     </div>
 
                     ${isAnswered ? renderExplanationArea(q) : ''}
@@ -696,82 +719,58 @@
             `;
         }
 
-        function renderOptionButton(optionText, idx, correctIndex) {
-            let btnStyle = "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 active:scale-[0.99]";
-            let badgeStyle = "bg-slate-100 text-slate-600 group-hover:bg-slate-200";
-            let iconHtml = "";
+        function renderOptionButton(optionText, idx, correctIndices) {
+            const isSelected = selectedOptionIndices.includes(idx);
+            const isCorrectOption = correctIndices.includes(idx);
+
+            let btnStyle = "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300";
+            let badgeStyle = "bg-slate-100 text-slate-600";
+            let checkIcon = `<div class="w-5 h-5 rounded border border-slate-300 flex items-center justify-center text-xs text-transparent shrink-0"><i class="fa-solid fa-check"></i></div>`;
+
+            if (isSelected) {
+                btnStyle = "border-medical-500 bg-medical-50/60 text-medical-900 font-medium ring-1 ring-medical-500/30";
+                badgeStyle = "bg-medical-600 text-white";
+                checkIcon = `<div class="w-5 h-5 rounded bg-medical-600 border border-medical-600 flex items-center justify-center text-xs text-white shrink-0"><i class="fa-solid fa-check"></i></div>`;
+            }
 
             if (isAnswered) {
-                if (idx === correctIndex) {
+                if (isCorrectOption) {
                     btnStyle = "border-emerald-500 bg-emerald-50 text-emerald-900 font-semibold ring-2 ring-emerald-500/30";
                     badgeStyle = "bg-emerald-600 text-white";
-                    iconHtml = `<i class="fa-solid fa-circle-check text-emerald-600 text-base sm:text-lg ml-auto"></i>`;
-                } else if (idx === selectedOptionIndex) {
+                    checkIcon = `<i class="fa-solid fa-circle-check text-emerald-600 text-base sm:text-lg shrink-0"></i>`;
+                } else if (isSelected && !isCorrectOption) {
                     btnStyle = "border-rose-400 bg-rose-50 text-rose-900 font-medium";
                     badgeStyle = "bg-rose-500 text-white";
-                    iconHtml = `<i class="fa-solid fa-circle-xmark text-rose-500 text-base sm:text-lg ml-auto"></i>`;
+                    checkIcon = `<i class="fa-solid fa-circle-xmark text-rose-500 text-base sm:text-lg shrink-0"></i>`;
                 } else {
                     btnStyle = "border-slate-100 bg-slate-50 text-slate-400 opacity-60";
                     badgeStyle = "bg-slate-200 text-slate-400";
+                    checkIcon = `<div class="w-5 h-5 rounded border border-slate-200 bg-slate-100 shrink-0"></div>`;
                 }
             }
 
             return `
-                <button onclick="handleSelectOption(${idx})" ${isAnswered ? 'disabled' : ''} 
+                <button onclick="toggleOptionSelect(${idx})" ${isAnswered ? 'disabled' : ''} 
                     class="w-full text-left p-3 rounded-xl border transition-all duration-150 flex items-center gap-2.5 group ${btnStyle}">
                     <span class="w-6 h-6 sm:w-7 sm:h-7 rounded-lg text-xs font-bold flex items-center justify-center shrink-0 transition-all ${badgeStyle}">${idx + 1}</span>
                     <span class="text-xs sm:text-sm flex-1 leading-snug">${escapeHtml(optionText)}</span>
-                    ${iconHtml}
+                    ${checkIcon}
                 </button>
             `;
         }
 
-        function renderExplanationArea(q) {
-            const isCorrect = selectedOptionIndex === q.correctIndex;
-
-            return `
-                <div class="mt-4 sm:mt-6 rounded-2xl border ${isCorrect ? 'border-emerald-200 bg-emerald-50/60' : 'border-rose-200 bg-rose-50/60'} p-3.5 sm:p-5 space-y-3 sm:space-y-4">
-                    <div class="flex items-center justify-between border-b ${isCorrect ? 'border-emerald-200/80' : 'border-rose-200/80'} pb-2.5">
-                        <div class="flex items-center gap-2">
-                            <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center ${isCorrect ? 'bg-emerald-500 text-white' : 'bg-rose-500 text-white'} font-bold shrink-0">
-                                <i class="fa-solid ${isCorrect ? 'fa-check' : 'fa-xmark'} text-xs sm:text-base"></i>
-                            </div>
-                            <div>
-                                <h3 class="font-bold text-xs sm:text-base ${isCorrect ? 'text-emerald-900' : 'text-rose-900'}">${isCorrect ? '正解です！' : '不正解...'}</h3>
-                                <p class="text-[11px] sm:text-xs ${isCorrect ? 'text-emerald-700' : 'text-rose-700'}">正解: <span class="font-bold">${q.correctIndex + 1}. ${escapeHtml(q.options[q.correctIndex])}</span></p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="space-y-1">
-                        <h4 class="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1">
-                            <i class="fa-solid fa-book-open text-medical-600"></i> 解説
-                        </h4>
-                        <p class="text-xs sm:text-sm text-slate-700 leading-relaxed bg-white/80 p-3 rounded-xl border border-slate-200/60">${escapeHtml(q.explanation)}</p>
-                    </div>
-
-                    ${q.explanationImageUrl ? `
-                        <div class="space-y-1">
-                            <h4 class="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1">
-                                <i class="fa-solid fa-image text-emerald-600"></i> 補足画像 (タップで拡大)
-                            </h4>
-                            <div class="rounded-xl overflow-hidden border border-slate-200 bg-white p-1.5 text-center cursor-zoom-in" onclick="openZoomModal('${q.explanationImageUrl}')">
-                                <img src="${q.explanationImageUrl}" alt="Explanation Diagram" class="max-h-48 sm:max-h-56 mx-auto object-contain rounded-lg">
-                            </div>
-                        </div>
-                    ` : ''}
-
-                    <div class="pt-1 flex justify-end">
-                        <button onclick="handleNextQuestion()" class="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-1.5">
-                            <span>次の問題へ進む</span>
-                            <i class="fa-solid fa-arrow-right"></i>
-                        </button>
-                    </div>
-                </div>
-            `;
+        function toggleOptionSelect(idx) {
+            if (isAnswered) return;
+            const indexPos = selectedOptionIndices.indexOf(idx);
+            if (indexPos > -1) {
+                selectedOptionIndices.splice(indexPos, 1);
+            } else {
+                selectedOptionIndices.push(idx);
+            }
+            renderQuiz();
         }
 
-        async function handleSelectOption(idx) {
+        async function submitUserAnswer() {
             if (isAnswered) return;
 
             const staffInput = document.getElementById('global-staff-id');
@@ -782,11 +781,20 @@
                 return;
             }
 
-            selectedOptionIndex = idx;
-            isAnswered = true;
+            if (selectedOptionIndices.length === 0) {
+                alert("少なくとも1つの回答を選択してください。");
+                return;
+            }
 
+            isAnswered = true;
             const q = currentFilteredQuestions[currentQuestionIndex];
-            const isCorrect = idx === q.correctIndex;
+            const correctIndices = getCorrectIndices(q);
+
+            const sortedSelected = [...selectedOptionIndices].sort((a, b) => a - b);
+            const sortedCorrect = [...correctIndices].sort((a, b) => a - b);
+            const isCorrect = JSON.stringify(sortedSelected) === JSON.stringify(sortedCorrect);
+
+            const selectedText = sortedSelected.map(i => `${i + 1}. ${q.options[i]}`).join(', ');
 
             renderQuiz();
 
@@ -801,7 +809,7 @@
                         questionId: q.id,
                         group: q.group,
                         isCorrect: isCorrect,
-                        selectedOptionText: `${idx + 1}. ${q.options[idx]}`
+                        selectedOptionText: selectedText
                     })
                 });
                 
@@ -811,15 +819,70 @@
                     questionId: q.id,
                     group: q.group,
                     isCorrect: isCorrect,
-                    selectedOption: `${idx + 1}. ${q.options[idx]}`
+                    selectedOption: selectedText
                 });
             } catch (err) {
                 console.error("履歴送信失敗:", err);
             }
         }
 
+        function renderExplanationArea(q) {
+            const correctIndices = getCorrectIndices(q);
+            const sortedSelected = [...selectedOptionIndices].sort((a, b) => a - b);
+            const sortedCorrect = [...correctIndices].sort((a, b) => a - b);
+            const isCorrect = JSON.stringify(sortedSelected) === JSON.stringify(sortedCorrect);
+
+            const correctText = sortedCorrect.map(i => `${i + 1}. ${escapeHtml(q.options[i])}`).join(' / ');
+            const expImages = getExpImageUrls(q);
+
+            return `
+                <div class="mt-4 sm:mt-6 rounded-2xl border ${isCorrect ? 'border-emerald-200 bg-emerald-50/60' : 'border-rose-200 bg-rose-50/60'} p-3.5 sm:p-5 space-y-3 sm:space-y-4">
+                    <div class="flex items-center justify-between border-b ${isCorrect ? 'border-emerald-200/80' : 'border-rose-200/80'} pb-2.5">
+                        <div class="flex items-center gap-2">
+                            <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center ${isCorrect ? 'bg-emerald-500 text-white' : 'bg-rose-500 text-white'} font-bold shrink-0">
+                                <i class="fa-solid ${isCorrect ? 'fa-check' : 'fa-xmark'} text-xs sm:text-base"></i>
+                            </div>
+                            <div>
+                                <h3 class="font-bold text-xs sm:text-base ${isCorrect ? 'text-emerald-900' : 'text-rose-900'}">${isCorrect ? '正解です！' : '不正解...'}</h3>
+                                <p class="text-[11px] sm:text-xs ${isCorrect ? 'text-emerald-700' : 'text-rose-700'}">正解: <span class="font-bold">${correctText}</span></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-1">
+                        <h4 class="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1">
+                            <i class="fa-solid fa-book-open text-medical-600"></i> 解説
+                        </h4>
+                        <p class="text-xs sm:text-sm text-slate-700 leading-relaxed bg-white/80 p-3 rounded-xl border border-slate-200/60">${escapeHtml(q.explanation)}</p>
+                    </div>
+
+                    ${expImages.length > 0 ? `
+                        <div class="space-y-1.5">
+                            <h4 class="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1">
+                                <i class="fa-solid fa-images text-emerald-600"></i> 補足画像 (全 ${expImages.length} 枚 / タップで拡大)
+                            </h4>
+                            <div class="grid grid-cols-1 ${expImages.length > 1 ? 'sm:grid-cols-2' : ''} gap-2">
+                                ${expImages.map(url => `
+                                    <div class="rounded-xl overflow-hidden border border-slate-200 bg-white p-1.5 text-center cursor-zoom-in" onclick="openZoomModal('${url}')">
+                                        <img src="${url}" alt="Explanation Diagram" class="max-h-48 sm:max-h-56 mx-auto object-contain rounded-lg">
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    <div class="pt-1 flex justify-end">
+                        <button onclick="handleNextQuestion()" class="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-1.5">
+                            <span>次の問題へ進む</span>
+                            <i class="fa-solid fa-arrow-right"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
         function handleNextQuestion() {
-            selectedOptionIndex = null;
+            selectedOptionIndices = [];
             isAnswered = false;
             if (currentQuestionIndex + 1 < currentFilteredQuestions.length) {
                 currentQuestionIndex++;
@@ -862,8 +925,8 @@
             for (let i = 0; i < 4; i++) {
                 html += `
                     <div class="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200 focus-within:border-medical-500 transition-all">
-                        <label class="flex items-center gap-1 cursor-pointer px-2 py-1 rounded bg-slate-200 text-xs font-bold text-slate-700 shrink-0">
-                            <input type="radio" name="correctOption" value="${i}" ${i === 0 ? 'checked' : ''} class="text-medical-600">
+                        <label class="flex items-center gap-1 cursor-pointer px-2 py-1 rounded bg-slate-200 hover:bg-slate-300 text-xs font-bold text-slate-700 shrink-0">
+                            <input type="checkbox" name="correctOption" value="${i}" ${i === 0 ? 'checked' : ''} class="w-4 h-4 text-medical-600 rounded focus:ring-medical-500">
                             <span>正解</span>
                         </label>
                         <span class="text-xs font-bold text-slate-400 w-4 text-center shrink-0">${i + 1}.</span>
@@ -873,6 +936,74 @@
                 `;
             }
             container.innerHTML = html;
+        }
+
+        // --- 解説画像複数制御関数 ---
+        function addExpImageSlot(initialUrl = '') {
+            const container = document.getElementById('exp-images-container');
+            if (!container) return;
+
+            const existingSlots = container.querySelectorAll('.exp-img-slot');
+            if (existingSlots.length >= 4) {
+                alert("解説画像は最大4枚まで登録可能です。");
+                return;
+            }
+
+            const slotId = expImageSlotCount++;
+            const slotDiv = document.createElement('div');
+            slotDiv.className = "exp-img-slot p-2.5 bg-white rounded-lg border border-slate-200 space-y-2 relative";
+            slotDiv.id = `exp-slot-${slotId}`;
+
+            slotDiv.innerHTML = `
+                <div class="flex items-center justify-between gap-2">
+                    <span class="text-[11px] font-bold text-emerald-800">画像 #${existingSlots.length + 1}</span>
+                    <button type="button" onclick="removeExpImageSlot(${slotId})" class="text-rose-500 hover:text-rose-700 text-xs px-1.5 py-0.5 rounded hover:bg-rose-50">
+                        <i class="fa-solid fa-trash-can"></i> 削除
+                    </button>
+                </div>
+                <div class="flex flex-col sm:flex-row gap-2">
+                    <label class="flex-1 cursor-pointer">
+                        <div class="flex items-center justify-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold px-2.5 py-1.5 rounded-lg text-center">
+                            <i class="fa-solid fa-upload text-emerald-600"></i> ファイルから選択
+                        </div>
+                        <input type="file" accept="image/*" onchange="handleImageFileSelect(event, 'exp-preview-${slotId}', 'input-exp-url-${slotId}')" class="hidden">
+                    </label>
+                    <span class="text-xs text-slate-400 text-center sm:self-center">または</span>
+                    <input type="url" id="input-exp-url-${slotId}" placeholder="解説画像URL (https://...)" 
+                        value="${initialUrl.startsWith('http') ? initialUrl : ''}"
+                        oninput="handleImageUrlInput(this.value, 'exp-preview-${slotId}')"
+                        class="flex-[2] bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500">
+                </div>
+                <div class="relative rounded-lg border border-slate-200 bg-slate-50 overflow-hidden min-h-[60px] flex items-center justify-center">
+                    <img id="exp-preview-${slotId}" src="${initialUrl}" class="${initialUrl ? '' : 'hidden'} max-h-32 w-full object-contain p-1 cursor-zoom-in" onclick="openZoomModal(this.src)">
+                    <div id="exp-preview-${slotId}-placeholder" class="${initialUrl ? 'hidden' : ''} text-center text-slate-400 p-2">
+                        <p class="text-[11px]">プレビュー表示</p>
+                    </div>
+                </div>
+            `;
+
+            container.appendChild(slotDiv);
+        }
+
+        function removeExpImageSlot(slotId) {
+            const slot = document.getElementById(`exp-slot-${slotId}`);
+            if (slot) slot.remove();
+            
+            // スロット削除後、ラベル番号を振り直し
+            const container = document.getElementById('exp-images-container');
+            if (container) {
+                const slots = container.querySelectorAll('.exp-img-slot');
+                slots.forEach((s, idx) => {
+                    const label = s.querySelector('.text-emerald-800');
+                    if (label) label.textContent = `画像 #${idx + 1}`;
+                });
+            }
+        }
+
+        function clearExpImageSlots() {
+            const container = document.getElementById('exp-images-container');
+            if (container) container.innerHTML = '';
+            expImageSlotCount = 0;
         }
 
         function updateManageQuestionSelect() {
@@ -1022,19 +1153,23 @@
                 const optEl = document.getElementById(`input-option-${i}`);
                 if (optEl) optEl.value = q.options[i] || '';
             }
-            const radios = document.querySelectorAll('input[name="correctOption"]');
-            if (radios[q.correctIndex]) radios[q.correctIndex].checked = true;
+
+            const checkboxes = document.querySelectorAll('input[name="correctOption"]');
+            const correctIndices = getCorrectIndices(q);
+            checkboxes.forEach((cb, idx) => {
+                cb.checked = correctIndices.includes(idx);
+            });
 
             const expEl = document.getElementById('input-explanation');
             if (expEl) expEl.value = q.explanation;
 
-            const expUrlEl = document.getElementById('input-exp-image-url');
-            if (q.explanationImageUrl) {
-                if (expUrlEl) expUrlEl.value = q.explanationImageUrl.startsWith('http') ? q.explanationImageUrl : '';
-                updatePreview('exp-preview', q.explanationImageUrl);
+            // 解説画像のロード (スロット再構築)
+            clearExpImageSlots();
+            const expUrls = getExpImageUrls(q);
+            if (expUrls.length > 0) {
+                expUrls.forEach(url => addExpImageSlot(url));
             } else {
-                if (expUrlEl) expUrlEl.value = '';
-                updatePreview('exp-preview', '');
+                addExpImageSlot();
             }
 
             switchMainTab('create');
@@ -1098,12 +1233,23 @@
                 options.push(val);
             }
 
-            const correctRadio = document.querySelector('input[name="correctOption"]:checked');
-            const correctIndex = parseInt(correctRadio ? correctRadio.value : '0', 10);
+            const correctCheckboxes = document.querySelectorAll('input[name="correctOption"]:checked');
+            if (correctCheckboxes.length === 0) {
+                return alert('正解を少なくとも1つ選択してください');
+            }
+            const correctIndices = Array.from(correctCheckboxes).map(cb => parseInt(cb.value, 10));
+
             const explanation = document.getElementById('input-explanation')?.value.trim() || '';
-            const expImgEl = document.getElementById('exp-preview');
-            const expImgSrc = expImgEl ? expImgEl.src : '';
-            const hasExpImg = expImgSrc && expImgSrc !== window.location.href && expImgEl && !expImgEl.classList.contains('hidden');
+
+            // 登録されている有効な解説画像URLの取得
+            const expImageUrls = [];
+            const expSlots = document.querySelectorAll('.exp-img-slot');
+            expSlots.forEach(slot => {
+                const img = slot.querySelector('img');
+                if (img && img.src && img.src !== window.location.href && !img.classList.contains('hidden')) {
+                    expImageUrls.push(img.src);
+                }
+            });
 
             const id = editingId ? parseInt(editingId, 10) : (questions.length > 0 ? Math.max(...questions.map(q => q.id)) + 1 : 1);
 
@@ -1114,9 +1260,9 @@
                 title: title,
                 imageUrl: ecgImgSrc,
                 options: options,
-                correctIndex: correctIndex,
+                correctIndices: correctIndices,
                 explanation: explanation,
-                explanationImageUrl: hasExpImg ? expImgSrc : null
+                explanationImageUrls: expImageUrls // 配列で送信
             };
 
             const submitBtn = document.getElementById('submit-btn');
@@ -1168,7 +1314,8 @@
             if (submitBtnText) submitBtnText.textContent = '保存する';
 
             updatePreview('ecg-preview', '');
-            updatePreview('exp-preview', '');
+            clearExpImageSlots();
+            addExpImageSlot(); // 初期スロットに戻す
             toggleCustomGroupInput('基礎編');
             updateAutoAssignedId();
         }
